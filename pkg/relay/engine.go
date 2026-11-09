@@ -9,6 +9,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // EngineMetrics tracks runtime operational statistics atomically.
@@ -302,29 +305,45 @@ func (e *Engine) runReaper() {
 	}
 }
 
-// PrometheusHandler returns an http.Handler that serves Prometheus metrics in text format.
+// PrometheusHandler returns an http.Handler that serves Prometheus metrics using client_golang.
 func (e *Engine) PrometheusHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m := e.Metrics()
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		fmt.Fprintf(w, "# HELP pgrelay_enqueued_total Total number of enqueued events\n")
-		fmt.Fprintf(w, "# TYPE pgrelay_enqueued_total counter\n")
-		fmt.Fprintf(w, "pgrelay_enqueued_total %d\n", m.EnqueuedTotal)
-
-		fmt.Fprintf(w, "# HELP pgrelay_delivered_total Total number of delivered events\n")
-		fmt.Fprintf(w, "# TYPE pgrelay_delivered_total counter\n")
-		fmt.Fprintf(w, "pgrelay_delivered_total %d\n", m.DeliveredTotal)
-
-		fmt.Fprintf(w, "# HELP pgrelay_retried_total Total number of retried events\n")
-		fmt.Fprintf(w, "# TYPE pgrelay_retried_total counter\n")
-		fmt.Fprintf(w, "pgrelay_retried_total %d\n", m.RetriedTotal)
-
-		fmt.Fprintf(w, "# HELP pgrelay_dead_total Total number of dead-lettered events\n")
-		fmt.Fprintf(w, "# TYPE pgrelay_dead_total counter\n")
-		fmt.Fprintf(w, "pgrelay_dead_total %d\n", m.DeadTotal)
-
-		fmt.Fprintf(w, "# HELP pgrelay_reclaimed_total Total number of reclaimed stale events\n")
-		fmt.Fprintf(w, "# TYPE pgrelay_reclaimed_total counter\n")
-		fmt.Fprintf(w, "pgrelay_reclaimed_total %d\n", m.ReclaimedTotal)
-	})
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Name: "pgrelay_enqueued_total",
+				Help: "Total number of enqueued events",
+			},
+			func() float64 { return float64(atomic.LoadUint64(&e.metrics.EnqueuedTotal)) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Name: "pgrelay_delivered_total",
+				Help: "Total number of delivered events",
+			},
+			func() float64 { return float64(atomic.LoadUint64(&e.metrics.DeliveredTotal)) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Name: "pgrelay_retried_total",
+				Help: "Total number of retried events",
+			},
+			func() float64 { return float64(atomic.LoadUint64(&e.metrics.RetriedTotal)) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Name: "pgrelay_dead_total",
+				Help: "Total number of dead-lettered events",
+			},
+			func() float64 { return float64(atomic.LoadUint64(&e.metrics.DeadTotal)) },
+		),
+		prometheus.NewCounterFunc(
+			prometheus.CounterOpts{
+				Name: "pgrelay_reclaimed_total",
+				Help: "Total number of reclaimed stale events",
+			},
+			func() float64 { return float64(atomic.LoadUint64(&e.metrics.ReclaimedTotal)) },
+		),
+	)
+	return promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
 }

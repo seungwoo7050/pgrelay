@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,7 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/woopinbell/pgrelay/pkg/relay"
+	"github.com/google/uuid"
+	"github.com/seungwoo7050/pgrelay/pkg/relay"
 )
 
 func main() {
@@ -69,8 +68,8 @@ func main() {
 		log.Fatalf("[pgrelay] Failed to initialize engine: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if err := engine.Start(ctx); err != nil {
 		log.Fatalf("[pgrelay] Failed to start engine: %v", err)
@@ -158,10 +157,8 @@ func main() {
 	}()
 
 	// Graceful shutdown handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	sig := <-sigCh
-	log.Printf("[pgrelay] Caught signal %s, draining workers and stopping daemon...", sig)
+	<-ctx.Done()
+	log.Println("[pgrelay] Caught shutdown signal, draining workers and stopping daemon...")
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
@@ -179,7 +176,9 @@ func main() {
 }
 
 func generateEventID() string {
-	b := make([]byte, 12)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("evt_%s", hex.EncodeToString(b))
+	return newEventID()
+}
+
+func newEventID() string {
+	return "evt_" + uuid.NewString()
 }

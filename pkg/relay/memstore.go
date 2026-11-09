@@ -1,11 +1,13 @@
 package relay
 
 import (
+	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 )
@@ -150,11 +152,11 @@ func (s *MemStore) ClaimBatch(ctx context.Context, workerID string, batchSize in
 	}
 
 	// Sort deterministically: NextAttemptAt ascending, then ID ascending
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].NextAttemptAt.Equal(candidates[j].NextAttemptAt) {
-			return candidates[i].ID < candidates[j].ID
+	slices.SortFunc(candidates, func(a, b *Event) int {
+		if c := a.NextAttemptAt.Compare(b.NextAttemptAt); c != 0 {
+			return c
 		}
-		return candidates[i].NextAttemptAt.Before(candidates[j].NextAttemptAt)
+		return cmp.Compare(a.ID, b.ID)
 	})
 
 	if len(candidates) > batchSize {
@@ -274,16 +276,8 @@ func cloneEvent(e *Event) *Event {
 		return nil
 	}
 	c := *e
-	if len(e.Payload) > 0 {
-		c.Payload = make(json.RawMessage, len(e.Payload))
-		copy(c.Payload, e.Payload)
-	}
-	if e.Headers != nil {
-		c.Headers = make(map[string]string, len(e.Headers))
-		for k, v := range e.Headers {
-			c.Headers[k] = v
-		}
-	}
+	c.Payload = bytes.Clone(e.Payload)
+	c.Headers = maps.Clone(e.Headers)
 	if e.LockedAt != nil {
 		t := *e.LockedAt
 		c.LockedAt = &t
